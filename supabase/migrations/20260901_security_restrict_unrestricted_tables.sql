@@ -99,7 +99,14 @@ begin
     'staff',
     'establishment_ratings'
   ] loop
-    if to_regclass(format('public.%I', table_name)) is not null then
+    if exists (
+      select 1
+      from pg_class c
+      join pg_namespace n on n.oid = c.relnamespace
+      where n.nspname = 'public'
+        and c.relname = table_name
+        and c.relkind in ('r', 'p')
+    ) then
       execute format('alter table public.%I enable row level security', table_name);
     end if;
   end loop;
@@ -130,6 +137,67 @@ begin
         or policyname like 'Enable insert for authenticated users%'
         or policyname like 'Enable update for authenticated users%'
       )
+  loop
+    execute format('drop policy if exists %I on %I.%I', r.policyname, r.schemaname, r.tablename);
+  end loop;
+end;
+$$;
+
+-- Remove legacy policies that used the Postgres `public` role, which includes anon
+-- users. These policies are the main cause of sensitive report/cache rows remaining
+-- readable even after RLS is enabled.
+do $$
+declare
+  r record;
+begin
+  for r in
+    select schemaname, tablename, policyname
+    from pg_policies
+    where schemaname = 'public'
+      and tablename in (
+        'profiles',
+        'visitor_reports',
+        'accommodation_reports',
+        'room_occupancy_details',
+        'ai_recommendations',
+        'ai_anomalies',
+        'ai_anomalies_cache',
+        'ai_insights_cache',
+        'audit_logs',
+        'email_otps',
+        'notifications',
+        'staff'
+      )
+      and roles @> array['public']::name[]
+  loop
+    execute format('drop policy if exists %I on %I.%I', r.policyname, r.schemaname, r.tablename);
+  end loop;
+end;
+$$;
+
+-- Drop older authenticated catch-all policies on sensitive tables. Scoped policies
+-- below replace them.
+do $$
+declare
+  r record;
+begin
+  for r in
+    select schemaname, tablename, policyname
+    from pg_policies
+    where schemaname = 'public'
+      and tablename in (
+        'profiles',
+        'visitor_reports',
+        'accommodation_reports',
+        'room_occupancy_details',
+        'ai_recommendations',
+        'ai_anomalies',
+        'ai_anomalies_cache',
+        'audit_logs',
+        'notifications',
+        'staff'
+      )
+      and policyname like 'Allow authenticated users to %'
   loop
     execute format('drop policy if exists %I on %I.%I', r.policyname, r.schemaname, r.tablename);
   end loop;
@@ -427,7 +495,14 @@ begin
       with check (public.is_municipal_officer());
   end if;
 
-  if to_regclass('public.staff') is not null then
+  if exists (
+    select 1
+    from pg_class c
+    join pg_namespace n on n.oid = c.relnamespace
+    where n.nspname = 'public'
+      and c.relname = 'staff'
+      and c.relkind in ('r', 'p')
+  ) then
     alter table public.staff enable row level security;
     drop policy if exists "Staff table scoped to user or officers" on public.staff;
     if exists (
