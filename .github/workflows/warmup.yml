@@ -1,0 +1,30 @@
+name: Keep VistaBalayan public site warm
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  warmup:
+    name: Warm public app and Supabase public reads
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Warm public website and Supabase
+        env:
+          PUBLIC_APP_URL: https://vistabalayan-public-viewing.vercel.app
+          SUPABASE_URL: https://jopqjlvtaxgfxqbdbqqq.supabase.co
+          SUPABASE_ANON_KEY: sb_publishable_zs0OkMYBv5BmHUk92KNoPQ_FzCJKw27
+        run: node scripts/warmup.mjs
